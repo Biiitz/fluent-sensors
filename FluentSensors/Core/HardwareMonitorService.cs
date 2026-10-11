@@ -59,6 +59,10 @@ namespace FluentSensors.Core
         private HashSet<string> _activeNetworkAdapters = new();
         private long _networkAdapterRefreshTimestamp;
 
+        // hardware that left since the last tick (unplugged, or a network adapter that is no longer up), by the name
+        // the payload gives it; under _sensorLock, broadcast right after the first payload without it
+        private readonly List<string> _removedHardwareNames = new();
+
 
         // === singleton instance ===
 
@@ -171,6 +175,10 @@ namespace FluentSensors.Core
             // already running
             if (_cts != null) return;
 
+            // before the first flatten, which then covers whatever was added in between
+            _computer.HardwareAdded += OnHardwareAdded;
+            _computer.HardwareRemoved += OnHardwareRemoved;
+
             InitAllSensors();
 
             NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
@@ -186,6 +194,8 @@ namespace FluentSensors.Core
             if (_cts == null) return;
 
             NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+            _computer.HardwareAdded -= OnHardwareAdded;
+            _computer.HardwareRemoved -= OnHardwareRemoved;
 
             _cts.Cancel();
 
@@ -239,6 +249,9 @@ namespace FluentSensors.Core
 
         // one event per tick with every sensor reading
         public event Action<List<SensorData>>? HardwareDataUpdated;
+
+        // hardware that is gone, by its payload name; after the first payload without it, on the polling thread
+        public event Action<List<string>>? HardwareRemoved;
 
         // the polling interval changed; graphs keep their time span with it (point count = span / interval)
         public event Action<int>? UpdateIntervalChanged;
@@ -337,6 +350,7 @@ namespace FluentSensors.Core
 
                 // a fresh payload per tick
                 var payload = new List<SensorData>();
+                List<string>? removedHardwareNames = null;
 
                 lock (_sensorLock)
                 {
@@ -372,24 +386,24 @@ namespace FluentSensors.Core
                                 value /= 1_048_576.0;
                             }
 
-                            // some NVMe names are padded with control characters, which
-                            // IsNullOrWhiteSpace does not catch
-                            string cleanedName = new string(sensor.Hardware.Name.Where(c => !char.IsControl(c)).ToArray()).Trim();
-
-                            // hardware type and LHM identifier, so a group name is never blank
-                            string hardwareName = string.IsNullOrWhiteSpace(cleanedName)
-                                ? $"{sensor.Hardware.HardwareType} ({sensor.Hardware.Identifier})"
-                                : cleanedName;
-
                             payload.Add(new SensorData(
                                 Id: id,
                                 Name: sensor.Name,
-                                HardwareName: hardwareName,
+                                HardwareName: GetHardwareName(sensor.Hardware),
                                 HardwareType: sensor.Hardware.HardwareType.ToString(),
                                 SensorType: sensor.SensorType.ToString(),
                                 Value: value
                             ));
                         }
+                    }
+
+                    // taken with the payload, so the two never disagree; a name that is back in it already (an
+                    // adapter that only dropped for a moment) stays
+                    if (_removedHardwareNames.Count > 0)
+                    {
+                        var present = new HashSet<string>(payload.Select(data => data.HardwareName));
+                        removedHardwareNames = _removedHardwareNames.Where(name => !present.Contains(name)).Distinct().ToList();
+                        _removedHardwareNames.Clear();
                     }
                 }
 
@@ -414,6 +428,8 @@ namespace FluentSensors.Core
                 lastBroadcastTimestamp = broadcastTimestamp;
 
                 HardwareDataUpdated?.Invoke(payload);
+
+                if (removedHardwareNames is { Count: > 0 }) HardwareRemoved?.Invoke(removedHardwareNames);
 
                 // the idle gap after a broadcast, where a rebuild costs nothing
                 RefreshNetworkAdapters();
@@ -497,11 +513,78 @@ namespace FluentSensors.Core
             // keyed by NetworkInterface.Name, which matches the LHM Hardware.Name
             // Windows reports filter layers (QoS Packet Scheduler, WFP, WiFi filter drivers) and WAN Miniport stubs as
             // up; only a real adapter has an IP address
-            _activeNetworkAdapters = new HashSet<string>(
+            var upAdapters = new HashSet<string>(
                 NetworkInterface.GetAllNetworkInterfaces()
                     .Where(nic => nic.OperationalStatus == OperationalStatus.Up &&
                         nic.GetIPProperties().UnicastAddresses.Count > 0)
                     .Select(nic => nic.Name));
+
+            // an adapter that went down (wi-fi off, cable out) leaves the pages like an unplugged one; LHM keeps it
+            var wentDown = _activeNetworkAdapters.Where(name => !upAdapters.Contains(name)).ToList();
+            if (wentDown.Count > 0)
+            {
+                lock (_sensorLock)
+                {
+                    _removedHardwareNames.AddRange(wentDown);
+                }
+            }
+
+            _activeNetworkAdapters = upAdapters;
+        }
+
+        // a drive or a network adapter that was plugged in after the scan; LHM watches both itself and raises this on
+        // its own thread, the sensors join the next tick
+        private void OnHardwareAdded(IHardware hardware)
+        {
+            var sensors = new List<ISensor>();
+            DiscoverSensors(hardware, sensors);
+
+            lock (_sensorLock)
+            {
+                foreach (var sensor in sensors)
+                {
+                    if (!_activeSensors.Contains(sensor)) _activeSensors.Add(sensor);
+                }
+            }
+        }
+
+        // unplugged; LHM closed the hardware, its sensors would only repeat their last value
+        private void OnHardwareRemoved(IHardware hardware)
+        {
+            var sensors = new List<ISensor>();
+            DiscoverSensors(hardware, sensors);
+
+            var names = new List<string>();
+            CollectHardwareNames(hardware, names);
+
+            lock (_sensorLock)
+            {
+                _activeSensors.RemoveAll(sensors.Contains);
+                _removedHardwareNames.AddRange(names);
+            }
+        }
+
+        private static void CollectHardwareNames(IHardware hardware, List<string> target)
+        {
+            target.Add(GetHardwareName(hardware));
+
+            foreach (var subHardware in hardware.SubHardware)
+            {
+                CollectHardwareNames(subHardware, target);
+            }
+        }
+
+        // the name a piece of hardware goes by in the payload
+        private static string GetHardwareName(IHardware hardware)
+        {
+            // some NVMe names are padded with control characters, which
+            // IsNullOrWhiteSpace does not catch
+            string cleanedName = new string(hardware.Name.Where(c => !char.IsControl(c)).ToArray()).Trim();
+
+            // hardware type and LHM identifier, so a group name is never blank
+            return string.IsNullOrWhiteSpace(cleanedName)
+                ? $"{hardware.HardwareType} ({hardware.Identifier})"
+                : cleanedName;
         }
 
         // flattens the hardware tree into _activeSensors, under _sensorLock against the polling loop
@@ -513,22 +596,22 @@ namespace FluentSensors.Core
 
                 foreach (var hardware in _computer.Hardware)
                 {
-                    DiscoverSensors(hardware);
+                    DiscoverSensors(hardware, _activeSensors);
                 }
             }
         }
 
-        private void DiscoverSensors(IHardware hardware)
+        private static void DiscoverSensors(IHardware hardware, List<ISensor> target)
         {
             foreach (var sensor in hardware.Sensors)
             {
-                _activeSensors.Add(sensor);
+                target.Add(sensor);
             }
 
             // sub-hardware, e.g. the super I/O chips under a motherboard
             foreach (var subHardware in hardware.SubHardware)
             {
-                DiscoverSensors(subHardware);
+                DiscoverSensors(subHardware, target);
             }
         }
     }

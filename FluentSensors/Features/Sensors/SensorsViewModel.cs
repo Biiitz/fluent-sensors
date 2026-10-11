@@ -29,6 +29,9 @@ namespace FluentSensors.Features.Sensors
         private TaskCompletionSource<bool> _initialLoadTcs = new TaskCompletionSource<bool>();
         public Task WaitForInitialLoadAsync() => _initialLoadTcs.Task; // MainWindow waits on this
 
+        private readonly DispatcherQueue _dispatcherQueue;
+        private bool _isAvailabilityChangeQueued; // see QueueSensorAvailabilityChanged
+
         // keeps OnSensorRowSelectionChanged quiet while ResyncCheckboxesForActiveProfile mirrors a saved selection
         private bool _isResyncingCheckboxes = false;
 
@@ -57,6 +60,7 @@ namespace FluentSensors.Features.Sensors
         private SensorsViewModel()
         {
             HardwareGroups = new ObservableCollection<HardwareGroupViewModel>();
+            _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
             // the first access creates the lazy LhmHardwareTreeService; since this view model is built at the splash,
             // the tree runs from app start
@@ -79,6 +83,8 @@ namespace FluentSensors.Features.Sensors
 
             // never detached; this view model lives for the whole session
             SettingsService.Instance.HardwareIconColorsChanged += RefreshGroupIconBrushes;
+            WinStaticInfoService.Instance.DrivesChanged += RefreshGroupDisplayNames;
+            WinStaticInfoService.Instance.NetworkAdaptersChanged += RefreshGroupDisplayNames;
         }
 
 
@@ -196,9 +202,18 @@ namespace FluentSensors.Features.Sensors
 
         // === event handlers ===
 
-        // newly discovered hardware instances
+        // newly discovered hardware instances, and the ones whose hardware left
         private void OnTreeHardwareGroupsChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
+            if (e.Action == NotifyCollectionChangedAction.Remove)
+            {
+                foreach (LhmHardwareInstance instance in e.OldItems)
+                {
+                    OnHardwareInstanceRemoved(instance);
+                }
+                return;
+            }
+
             if (e.Action != NotifyCollectionChangedAction.Add) return;
 
             foreach (LhmHardwareInstance instance in e.NewItems)
@@ -260,6 +275,51 @@ namespace FluentSensors.Features.Sensors
             }
         }
 
+        // a drive or adapter that LHM reported before Windows listed it got its raw name; the lists were asked again
+        private void RefreshGroupDisplayNames()
+        {
+            foreach (var group in HardwareGroups)
+            {
+                if (group.Kind != HardwareGroupKind.Storage && group.Kind != HardwareGroupKind.Network) continue;
+
+                group.HardwareName = GetDisplayName(group.Kind, group.LhmHardwareName);
+                group.IconGlyph = GetIconGlyph(group.Kind, group.LhmHardwareName);
+            }
+        }
+
+        // the group goes with its hardware; the saved selection, hidden state and thresholds of its sensors stay in
+        // their services, so the rows a replug builds come back as they were
+        private void OnHardwareInstanceRemoved(LhmHardwareInstance instance)
+        {
+            var group = HardwareGroups.FirstOrDefault(g => g.Kind == instance.Kind && g.LhmHardwareName == instance.HardwareName);
+            if (group == null) return;
+
+            foreach (var row in group.Sensors.Concat(group.HiddenSensors))
+            {
+                row.PropertyChanged -= OnSensorRowSelectionChanged;
+                row.Cleanup();
+            }
+
+            group.PropertyChanged -= Group_PropertyChanged;
+            HardwareGroups.Remove(group);
+
+            OnPropertyChanged(nameof(HasHiddenSensors));
+            QueueSensorAvailabilityChanged();
+        }
+
+        // once per burst; a device brings its sensors together, and a window re-resolves all of them at once
+        private void QueueSensorAvailabilityChanged()
+        {
+            if (_isAvailabilityChangeQueued) return;
+            _isAvailabilityChangeQueued = true;
+
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                _isAvailabilityChangeQueued = false;
+                SensorAvailabilityChanged?.Invoke();
+            });
+        }
+
         // the expander group of a new instance, with its sensors now and later
         private void OnHardwareInstanceDiscovered(LhmHardwareInstance instance)
         {
@@ -267,10 +327,10 @@ namespace FluentSensors.Features.Sensors
 
             var group = new HardwareGroupViewModel
             {
-                HardwareName = GetDisplayName(instance),
+                HardwareName = GetDisplayName(instance.Kind, instance.HardwareName),
                 LhmHardwareName = instance.HardwareName,
                 GroupLabel = profile.Label,
-                IconGlyph = GetIconGlyph(instance),
+                IconGlyph = GetIconGlyph(instance.Kind, instance.HardwareName),
                 Kind = instance.Kind
             };
             group.PropertyChanged += Group_PropertyChanged;
@@ -285,36 +345,36 @@ namespace FluentSensors.Features.Sensors
 
         // display only: storage and network show the matched model or adapter description (like PerformanceViewModel),
         // which reads better than the LHM name
-        private static string GetDisplayName(LhmHardwareInstance instance)
+        private static string GetDisplayName(HardwareGroupKind kind, string lhmHardwareName)
         {
-            switch (instance.Kind)
+            switch (kind)
             {
                 case HardwareGroupKind.Storage:
                     var drive = HardwareNameMatcher.FindBestMatch(
-                        instance.HardwareName,
+                        lhmHardwareName,
                         WinStaticInfoService.Instance.Drives,
                         d => d.FriendlyName);
-                    return drive?.FriendlyName ?? instance.HardwareName;
+                    return drive?.FriendlyName ?? lhmHardwareName;
 
                 case HardwareGroupKind.Network:
                     var adapter = HardwareNameMatcher.FindBestMatch(
-                        instance.HardwareName,
+                        lhmHardwareName,
                         WinStaticInfoService.Instance.NetworkAdapters,
                         a => a.Name);
-                    return adapter?.Description ?? instance.HardwareName;
+                    return adapter?.Description ?? lhmHardwareName;
 
                 default:
-                    return instance.HardwareName;
+                    return lhmHardwareName;
             }
         }
 
         // the category glyph; a wireless adapter gets its own, matched like GetDisplayName
-        private static string GetIconGlyph(LhmHardwareInstance instance)
+        private static string GetIconGlyph(HardwareGroupKind kind, string lhmHardwareName)
         {
-            if (instance.Kind != HardwareGroupKind.Network) return HardwareGroupInfo.GetProfile(instance.Kind).IconGlyph;
+            if (kind != HardwareGroupKind.Network) return HardwareGroupInfo.GetProfile(kind).IconGlyph;
 
             var adapter = HardwareNameMatcher.FindBestMatch(
-                instance.HardwareName,
+                lhmHardwareName,
                 WinStaticInfoService.Instance.NetworkAdapters,
                 a => a.Name);
             return HardwareGroupInfo.GetNetworkIconGlyph(adapter?.InterfaceType);
@@ -364,6 +424,7 @@ namespace FluentSensors.Features.Sensors
             }
 
             group.AddDiscoveredSensor(newRow, isHidden);
+            QueueSensorAvailabilityChanged();
 
             // the first sensor is in; MainWindow may go on
             if (!_initialLoadTcs.Task.IsCompleted && HardwareGroups.Count > 0)
@@ -375,6 +436,10 @@ namespace FluentSensors.Features.Sensors
 
 
         // === public methods ===
+
+        // hardware left, or sensors arrived; the widget windows and the taskbar widget show the part of their saved
+        // selection that exists right now
+        public event Action? SensorAvailabilityChanged;
 
         // every selected sensor, across all groups
         public void HideSelectedSensors()

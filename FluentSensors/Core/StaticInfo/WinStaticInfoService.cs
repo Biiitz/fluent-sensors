@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Management;
+using Microsoft.Win32;
 using System.Net.NetworkInformation;
+using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using Vortice.DXGI;
 using System.Net.Sockets;
 
@@ -16,6 +19,7 @@ namespace FluentSensors.Core.StaticInfo
     // static hardware info:
     // facts from Windows itself (WMI and Win32), queried once on first access, unlike the live
     // LHM sensors; a lazy singleton
+    // gpus, drives and network adapters can move while the app runs and are asked again, see the refresh section
     // the constructor blocks the first thread that touches Instance through several WMI queries, so it is prewarmed at
     // startup (see MainWindow.StartHardwareServiceAsync)
     public class WinStaticInfoService
@@ -34,26 +38,110 @@ namespace FluentSensors.Core.StaticInfo
             Drives = QueryDrives();
             NetworkAdapters = QueryNetworkAdapters();
             Motherboard = QueryMotherboard();
-            IsDotNetRuntimeInstalled = QueryDotNetRuntimeInstalled();
-            IsPawnIoInstalled = QueryPawnIoInstalled();
+            DotNetRuntimeState = !PretendPrerequisitesMissing && QueryDotNetRuntimeInstalled()
+                ? WinPrerequisiteState.Installed
+                : WinPrerequisiteState.Missing;
+            PawnIoState = !PretendPrerequisitesMissing && QueryPawnIoInstalled()
+                ? WinPrerequisiteState.Installed
+                : WinPrerequisiteState.Missing;
         }
 
 
+        // === switches ===
+
+        // true starts with both prerequisites missing whatever the machine has, to look at the hints; coming back
+        // to the main window then finds the real ones and shows the restart state
+        private const bool PretendPrerequisitesMissing = false;
+
+
         // === public binding surface ===
-        // (no INotifyPropertyChanged, nothing changes after construction)
+        // (no INotifyPropertyChanged; cpu, memory and motherboard never change after construction, the three lists
+        // are swapped whole by a refresh, which raises the matching event)
 
         public WinCpuInfo Cpu { get; }
-        public IReadOnlyList<WinGpuInfo> Gpus { get; }
+        public IReadOnlyList<WinGpuInfo> Gpus { get; private set; }
         public WinMemoryInfo Memory { get; }
-        public IReadOnlyList<WinStorageDriveInfo> Drives { get; }
-        public IReadOnlyList<WinNetworkAdapterInfo> NetworkAdapters { get; }
+        public IReadOnlyList<WinStorageDriveInfo> Drives { get; private set; }
+        public IReadOnlyList<WinNetworkAdapterInfo> NetworkAdapters { get; private set; }
         public WinMotherboardInfo Motherboard { get; }
 
-        // true once any Major >= 10 shared framework version is found, see QueryDotNetRuntimeInstalled
-        public bool IsDotNetRuntimeInstalled { get; }
+        // installed once any Major >= 10 shared framework version is found, see QueryDotNetRuntimeInstalled
+        public WinPrerequisiteState DotNetRuntimeState { get; private set; }
 
-        // true while the PawnIO kernel driver is present, see QueryPawnIoInstalled
-        public bool IsPawnIoInstalled { get; }
+        // installed while the PawnIO kernel driver is present, see QueryPawnIoInstalled
+        public WinPrerequisiteState PawnIoState { get; private set; }
+
+
+        // === refresh ===
+
+        // each asks Windows again off the calling thread, then swaps its list and raises its event back on it; called
+        // from the UI thread only (WinStaticInfoRefresher), so a consumer never sees a list change under it
+        // a device that is gone leaves its list, like its LHM instance leaves the hardware tree
+
+        public event Action? GpusChanged;
+        public event Action? DrivesChanged;
+        public event Action? NetworkAdaptersChanged;
+        public event Action? PrerequisitesChanged;
+
+        // the gpu list, the driver versions and the display each gpu drives
+        public async Task RefreshGpusAsync()
+        {
+            var fresh = await QueryChangedAsync(Gpus, QueryGpus);
+            if (fresh == null) return;
+
+            Gpus = fresh;
+            GpusChanged?.Invoke();
+        }
+
+        // the drive list and the reliability counters (temperature, power on hours, errors, wear)
+        public async Task RefreshDrivesAsync()
+        {
+            var fresh = await QueryChangedAsync(Drives, QueryDrives);
+            if (fresh == null) return;
+
+            Drives = fresh;
+            DrivesChanged?.Invoke();
+        }
+
+        // the adapters that are up, their link speed and addresses
+        public async Task RefreshNetworkAdaptersAsync()
+        {
+            var fresh = await QueryChangedAsync(NetworkAdapters, QueryNetworkAdapters);
+            if (fresh == null) return;
+
+            NetworkAdapters = fresh;
+            NetworkAdaptersChanged?.Invoke();
+        }
+
+        // looks again for what was missing at startup; found now means installed while the app runs, and LHM needs a
+        // restart to use it
+        public async Task RefreshPrerequisitesAsync()
+        {
+            bool dotNetArrived = DotNetRuntimeState == WinPrerequisiteState.Missing && await Task.Run(QueryDotNetRuntimeInstalled);
+            bool pawnIoArrived = PawnIoState == WinPrerequisiteState.Missing && await Task.Run(QueryPawnIoRegistered);
+            if (!dotNetArrived && !pawnIoArrived) return;
+
+            if (dotNetArrived) DotNetRuntimeState = WinPrerequisiteState.RestartRequired;
+            if (pawnIoArrived) PawnIoState = WinPrerequisiteState.RestartRequired;
+            PrerequisitesChanged?.Invoke();
+        }
+
+        // the fresh list; null when the query failed or nothing differs
+        private static async Task<List<T>?> QueryChangedAsync<T>(IReadOnlyList<T> current, Func<List<T>> query)
+        {
+            List<T> fresh;
+            try
+            {
+                fresh = await Task.Run(query);
+            }
+            catch
+            {
+                return null; // a failed WMI query keeps the last list
+            }
+
+            // by content; the records hold lists (addresses, displays), which their own equality compares by reference
+            return JsonSerializer.Serialize(fresh) == JsonSerializer.Serialize(current.ToList()) ? null : fresh;
+        }
 
 
         // === private helpers ===
@@ -512,6 +600,29 @@ namespace FluentSensors.Core.StaticInfo
                 // a library version without the property counts as installed, so the hint never shows on a fine machine
                 return true;
             }
+        }
+
+        // the same look LHM takes, for asking again: PawnIo.IsInstalled reads the uninstall entry once in its static
+        // constructor and never changes afterwards
+        private static bool QueryPawnIoRegistered()
+        {
+            const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO";
+
+            try
+            {
+                foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+                {
+                    using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+                    using var key = baseKey.OpenSubKey(UninstallKey);
+                    if (Version.TryParse(key?.GetValue("DisplayVersion") as string, out _)) return true;
+                }
+            }
+            catch
+            {
+                // no access to the key; stays missing
+            }
+
+            return false;
         }
 
         // many LHM sensors (several CPU and GPU ones) only populate with a .NET Desktop Runtime 10 or newer installed

@@ -21,7 +21,7 @@ using FluentSensors.Core.Update;
 namespace FluentSensors.Features.Start
 {
     // the start page view model:
-    // the static snapshot facts are built once and bind OneTime (WinStaticInfoService never changes after the splash);
+    // the static snapshot facts are built from WinStaticInfoService and rebuilt when it asked Windows again;
     // the sensor counts follow the LHM discovery, the icon colour its setting, the update block UpdateService
     public class StartViewModel : INotifyPropertyChanged
     {
@@ -53,7 +53,7 @@ namespace FluentSensors.Features.Start
         private bool _isUpdateActionEnabled = true;
 
         // the full set; the page binds the filtered SystemSnapshot
-        private readonly List<SystemSnapshotEntry> _allSnapshotEntries;
+        private List<SystemSnapshotEntry> _allSnapshotEntries;
 
         private string _sensorsFoundText = "-";
         private string _sensorsRenderedText = "-";
@@ -82,6 +82,12 @@ namespace FluentSensors.Features.Start
 
             RefreshSensorCounts();
             RefreshUpdateState();
+
+            // never detached; the page is cached and its view model lives for the session
+            WinStaticInfoService.Instance.GpusChanged += RefreshSnapshot;
+            WinStaticInfoService.Instance.DrivesChanged += RefreshSnapshot;
+            WinStaticInfoService.Instance.NetworkAdaptersChanged += RefreshSnapshot;
+            WinStaticInfoService.Instance.PrerequisitesChanged += () => OnPropertyChanged(nameof(PawnIoTileValue));
         }
 
 
@@ -191,9 +197,13 @@ namespace FluentSensors.Features.Start
             private set { _readTimeTileValue = value; OnPropertyChanged(); }
         }
 
-        // checked once at startup, like the title bar hint
-        public string PawnIoTileValue { get; } =
-            AppStrings.Get(WinStaticInfoService.Instance.IsPawnIoInstalled ? "Start_PawnIoInstalled" : "Start_PawnIoMissing");
+        // follows WinStaticInfoService like the title bar hint; missing can turn into restart required
+        public string PawnIoTileValue => AppStrings.Get(WinStaticInfoService.Instance.PawnIoState switch
+        {
+            WinPrerequisiteState.Installed => "Start_PawnIoInstalled",
+            WinPrerequisiteState.RestartRequired => "Start_PawnIoRestartRequired",
+            _ => "Start_PawnIoMissing"
+        });
 
         // the graphics tile, from WinAppGpuMonitor while the page shows
         public string GpuAdapterTileValue
@@ -414,6 +424,28 @@ namespace FluentSensors.Features.Start
             AddMotherboard(rows, info);
 
             return rows;
+        }
+
+        // a tile that is still there keeps its entry (and with it its place, its sensor pairing and the focus) and only
+        // takes the new facts; a new device gets a new entry
+        private void RefreshSnapshot()
+        {
+            var fresh = BuildSnapshot();
+            var remaining = _allSnapshotEntries.ToList(); // each entry is taken once, two drives can share a model name
+
+            for (int i = 0; i < fresh.Count; i++)
+            {
+                var existing = remaining.FirstOrDefault(e =>
+                    e.MatchKind == fresh[i].MatchKind && e.Category == fresh[i].Category && e.MatchName == fresh[i].MatchName);
+                if (existing == null) continue;
+
+                remaining.Remove(existing);
+                existing.Details = fresh[i].Details;
+                fresh[i] = existing;
+            }
+
+            _allSnapshotEntries = fresh;
+            RefreshSensorCounts();
         }
 
         // icon, colour and label from HardwareGroupInfo, like the sensor list and the hardware view; a "-" from the
