@@ -257,6 +257,22 @@ namespace FluentSensors.Persistence.Services
             }
         }
 
+        // the performance page graphs and the sensors page check boxes by sensor type instead of by hardware
+        private bool _useSensorTypeColors = Defaults.UseSensorTypeColors;
+        public bool UseSensorTypeColors
+        {
+            get => _useSensorTypeColors;
+            set
+            {
+                if (_useSensorTypeColors != value)
+                {
+                    _useSensorTypeColors = value;
+                    SensorTypeColorsChanged?.Invoke();
+                    SaveDebounced();
+                }
+            }
+        }
+
         // bytes or bits for sizes (SmallData, Data) and speeds (Throughput); mirrored onto
         // SensorUnitFormatter in Common, like above
         private DataUnitBasis _dataSizeUnitBasis = Defaults.DataSizeUnitBasis;
@@ -1119,6 +1135,7 @@ namespace FluentSensors.Persistence.Services
             _graphFillFade = data.GraphFillFade;
             _useHardwareIconColors = data.UseHardwareIconColors;
             HardwareColorMode.UseIconColors = _useHardwareIconColors;
+            _useSensorTypeColors = data.UseSensorTypeColors;
             _dataSizeUnitBasis = data.DataSizeUnitBasis;
             _dataSpeedUnitBasis = data.DataSpeedUnitBasis;
             SensorUnitFormatter.DataSizeBasis = _dataSizeUnitBasis;
@@ -1195,6 +1212,7 @@ namespace FluentSensors.Persistence.Services
                 GraphLineStyle = _graphLineStyle,
                 GraphFillFade = _graphFillFade,
                 UseHardwareIconColors = _useHardwareIconColors,
+                UseSensorTypeColors = _useSensorTypeColors,
                 DataSizeUnitBasis = _dataSizeUnitBasis,
                 DataSpeedUnitBasis = _dataSpeedUnitBasis,
                 PerformanceGraphTimeSpanSeconds = _performanceGraphTimeSpanSeconds,
@@ -1274,6 +1292,7 @@ namespace FluentSensors.Persistence.Services
 
         // no value; consumers re-read the switch
         public event Action HardwareIconColorsChanged;
+        public event Action SensorTypeColorsChanged;
 
         // no value; both unit settings raise it, consumers re-read from SensorUnitFormatter
         public event Action DataUnitBasisChanged;

@@ -11,7 +11,7 @@ namespace FluentSensors.Common.Sensors
     {
         public string Label { get; init; }
         public string IconGlyph { get; init; }
-        public Windows.UI.Color Color { get; init; }
+        public ThemeColorPair Colors { get; init; }
     }
 
     // the hardware categories:
@@ -53,7 +53,7 @@ namespace FluentSensors.Common.Sensors
         {
             if (HardwareColorMode.UseIconColors)
             {
-                return new SolidColorBrush(GetProfile(kind).Color);
+                return new SolidColorBrush(GetProfile(kind).Colors.ForTheme(HardwareColorMode.IsDarkTheme));
             }
 
             // DefaultTextColor, since TextFillColorPrimaryBrush from Application.Current.Resources answers the light
@@ -67,13 +67,13 @@ namespace FluentSensors.Common.Sensors
         {
             return kind switch
             {
-                HardwareGroupKind.Cpu => new HardwareGroupProfile { Label = "CPU", IconGlyph = HasFluentIconGlyphs ? CpuGlyph : CpuFallbackGlyph, Color = Windows.UI.Color.FromArgb(0xFF, 0x00, 0xB7, 0xC3) },
-                HardwareGroupKind.Ram => new HardwareGroupProfile { Label = "RAM", IconGlyph = HasFluentIconGlyphs ? RamGlyph : RamFallbackGlyph, Color = Windows.UI.Color.FromArgb(0xFF, 0x00, 0x78, 0xD4) },
-                HardwareGroupKind.Gpu => new HardwareGroupProfile { Label = "GPU", IconGlyph = "\uF211", Color = Windows.UI.Color.FromArgb(0xFF, 0xA2, 0x58, 0xB6) },
-                HardwareGroupKind.Storage => new HardwareGroupProfile { Label = "Storage", IconGlyph = "\uEDA2", Color = Windows.UI.Color.FromArgb(0xFF, 0x90, 0xC2, 0x42) },
+                HardwareGroupKind.Cpu => new HardwareGroupProfile { Label = "CPU", IconGlyph = HasFluentIconGlyphs ? CpuGlyph : CpuFallbackGlyph, Colors = ThemeColorPair.FromRgb(0x02B3BF, 0x02B3BF) },
+                HardwareGroupKind.Ram => new HardwareGroupProfile { Label = "RAM", IconGlyph = HasFluentIconGlyphs ? RamGlyph : RamFallbackGlyph, Colors = ThemeColorPair.FromRgb(0x4FA2F8, 0x4FA2F8) },
+                HardwareGroupKind.Gpu => new HardwareGroupProfile { Label = "GPU", IconGlyph = "\uF211", Colors = ThemeColorPair.FromRgb(0xC67ED9, 0xC67ED9) },
+                HardwareGroupKind.Storage => new HardwareGroupProfile { Label = "Storage", IconGlyph = "\uEDA2", Colors = ThemeColorPair.FromRgb(0x83AF3E, 0x83AF3E) },
                 // the category glyph is the wired one; a wireless adapter swaps it, see GetNetworkIconGlyph
-                HardwareGroupKind.Network => new HardwareGroupProfile { Label = "Network", IconGlyph = WiredNetworkGlyph, Color = Windows.UI.Color.FromArgb(0xFF, 0xBF, 0x59, 0x77) },
-                _ => new HardwareGroupProfile { Label = "Other", IconGlyph = "\uEA1F", Color = Windows.UI.Color.FromArgb(0xFF, 0x80, 0x80, 0x80) } // placeholder color
+                HardwareGroupKind.Network => new HardwareGroupProfile { Label = "Network", IconGlyph = WiredNetworkGlyph, Colors = ThemeColorPair.FromRgb(0xE97295, 0xE97295) },
+                _ => new HardwareGroupProfile { Label = "Other", IconGlyph = "\uEA1F", Colors = ThemeColorPair.FromRgb(0x9E9E9E, 0x9E9E9E) } // placeholder color
             };
         }
 

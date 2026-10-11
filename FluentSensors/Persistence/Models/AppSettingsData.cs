@@ -28,6 +28,10 @@ namespace FluentSensors.Persistence.Models
         // HardwareColorMode (graph colors are per surface, see GraphColorSource)
         public bool UseHardwareIconColors { get; set; } = false;
 
+        // sensor type colors; the graphs of the performance page and the check boxes of the sensors page, instead of
+        // the hardware color (the widget and the taskbar have SensorType in their own GraphColorSource)
+        public bool UseSensorTypeColors { get; set; } = false;
+
         // graph; global, every graph in the app
         public GraphLineStyle GraphLineStyle { get; set; } = GraphLineStyle.Stepline;
         // the area under the line fades towards the bottom instead of one flat tone

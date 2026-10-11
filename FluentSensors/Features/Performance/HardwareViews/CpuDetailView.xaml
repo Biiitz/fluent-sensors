@@ -139,10 +139,11 @@
                                             <DataTemplate x:DataType="fhGraph:SensorGraphViewModel">
                                                 <fhGraph:SensorPanelControl
                                                     Height="{StaticResource CpuCoreGraphHeight}"
-                                                    GraphColorOverride="{Binding HardwareColor, ElementName=Root}"
+                                                    GraphHardwareKind="Cpu"
                                                     GraphTapAction="ShowFlyout"
                                                     IsAutoScaledOverride="False"
                                                     ManualYMaxOverride="100"
+                                                    SensorTypeColor="Always"
                                                     ShowGraphLabel="True"
                                                     ShowGraphName="False"
                                                     ShowThresholdFlyoutIndicator="False"
@@ -154,13 +155,15 @@
                                     </ItemsControl>
 
                                     <!--  temperature graph  -->
+                                    <!--  (the color before the sensor type colors: #FFFFB900)  -->
                                     <fhGraph:SensorPanelControl
                                         Grid.Row="2"
                                         Height="{StaticResource CpuCoreGraphHeight}"
-                                        GraphColorOverride="#FFFFB900"
+                                        GraphHardwareKind="Cpu"
                                         GraphTapAction="ShowFlyout"
                                         IsAutoScaledOverride="False"
                                         ManualYMaxOverride="100"
+                                        SensorTypeColor="Always"
                                         ShowGraphLabel="True"
                                         ShowGraphName="False"
                                         ShowThresholdFlyoutIndicator="False"
@@ -169,12 +172,14 @@
                                         ViewModel="{x:Bind Temperature, Mode=OneWay}" />
 
                                     <!--  clock graph  -->
+                                    <!--  (the color before the sensor type colors: #FF00CC6A)  -->
                                     <fhGraph:SensorPanelControl
                                         Grid.Row="3"
                                         Height="{StaticResource CpuCoreGraphHeight}"
-                                        GraphColorOverride="#FF00CC6A"
+                                        GraphHardwareKind="Cpu"
                                         GraphTapAction="ShowFlyout"
                                         IsAutoScaledOverride="True"
+                                        SensorTypeColor="Always"
                                         ShowGraphLabel="True"
                                         ShowGraphName="False"
                                         ShowThresholdFlyoutIndicator="False"
@@ -229,7 +234,7 @@
                                     Grid.Row="0"
                                     Grid.RowSpan="2"
                                     Grid.Column="0"
-                                    GraphColorOverride="{x:Bind HardwareColor, Mode=OneTime}"
+                                    GraphHardwareKind="Cpu"
                                     IsAutoScaledOverride="False"
                                     ManualYMaxOverride="100"
                                     PlaceholderSensorName="CPU Load"
@@ -244,7 +249,7 @@
                                 <fhGraph:SensorPanelControl
                                     Grid.Row="0"
                                     Grid.Column="1"
-                                    GraphColorOverride="{x:Bind HardwareColor, Mode=OneTime}"
+                                    GraphHardwareKind="Cpu"
                                     IsAutoScaledOverride="False"
                                     ManualYMaxOverride="100"
                                     PlaceholderSensorName="CPU Temperature"
@@ -259,7 +264,7 @@
                                 <fhGraph:SensorPanelControl
                                     Grid.Row="1"
                                     Grid.Column="1"
-                                    GraphColorOverride="{x:Bind HardwareColor, Mode=OneTime}"
+                                    GraphHardwareKind="Cpu"
                                     IsAutoScaledOverride="True"
                                     PlaceholderSensorName="CPU Power"
                                     ShowStatusRow="True"
@@ -286,7 +291,7 @@
 
                                 <fhGraph:SensorPanelControl
                                     Grid.Row="0"
-                                    GraphColorOverride="{x:Bind HardwareColor, Mode=OneTime}"
+                                    GraphHardwareKind="Cpu"
                                     IsAutoScaledOverride="False"
                                     ManualYMaxOverride="100"
                                     PlaceholderSensorName="CPU Load"
@@ -300,7 +305,7 @@
 
                                 <fhGraph:SensorPanelControl
                                     Grid.Row="1"
-                                    GraphColorOverride="{x:Bind HardwareColor, Mode=OneTime}"
+                                    GraphHardwareKind="Cpu"
                                     IsAutoScaledOverride="False"
                                     ManualYMaxOverride="100"
                                     PlaceholderSensorName="CPU Temperature"
@@ -314,7 +319,7 @@
 
                                 <fhGraph:SensorPanelControl
                                     Grid.Row="2"
-                                    GraphColorOverride="{x:Bind HardwareColor, Mode=OneTime}"
+                                    GraphHardwareKind="Cpu"
                                     IsAutoScaledOverride="True"
                                     PlaceholderSensorName="CPU Power"
                                     ShowStatusRow="True"

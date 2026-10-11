@@ -64,6 +64,18 @@
                             Toggled="HardwareIconColorsToggle_Toggled" />
                     </controls:SettingsCard>
 
+                    <!--  sensor type colors  -->
+                    <!--
+                        (the performance page graphs and the sensors page check boxes by what a sensor measures; the
+                        widget and the taskbar have the same choice in their own graph color selectors)
+                    -->
+                    <controls:SettingsCard x:Uid="Settings_SensorTypeColorsCard">
+                        <ToggleSwitch
+                            x:Name="SensorTypeColorsToggle"
+                            x:Uid="Common_ToggleSwitch"
+                            Toggled="SensorTypeColorsToggle_Toggled" />
+                    </controls:SettingsCard>
+
                     <!--  graph rendering: line style and fill  -->
                     <!--
                         (both apply to every graph in the app, the per-surface sections below only add color and range;
@@ -426,6 +438,7 @@
                                 <ComboBoxItem x:Uid="Settings_GraphColorSourceComboBox_Accent" Tag="Accent" />
                                 <ComboBoxItem x:Uid="Settings_GraphColorSourceComboBox_Custom" Tag="Custom" />
                                 <ComboBoxItem x:Uid="Settings_GraphColorSourceComboBox_Hardware" Tag="Hardware" />
+                                <ComboBoxItem x:Uid="Settings_GraphColorSourceComboBox_SensorType" Tag="SensorType" />
                             </ComboBox>
 
                             <controls:ColorPickerButton x:Name="GraphColorPicker" x:Uid="Settings_GraphColorPicker" />
@@ -629,6 +642,7 @@
                                 <ComboBoxItem x:Uid="Settings_TaskbarGraphColorSourceComboBox_Accent" Tag="Accent" />
                                 <ComboBoxItem x:Uid="Settings_TaskbarGraphColorSourceComboBox_Custom" Tag="Custom" />
                                 <ComboBoxItem x:Uid="Settings_TaskbarGraphColorSourceComboBox_Hardware" Tag="Hardware" />
+                                <ComboBoxItem x:Uid="Settings_TaskbarGraphColorSourceComboBox_SensorType" Tag="SensorType" />
                             </ComboBox>
 
                             <controls:ColorPickerButton x:Name="TaskbarGraphColorPicker" x:Uid="Settings_TaskbarGraphColorPicker" />
